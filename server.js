@@ -3,40 +3,93 @@ import { DurableObject } from "cloudflare:workers";
 export class SignalingRoom extends DurableObject {
     constructor(ctx, env) {
         super(ctx, env);
-        this.clients = new Set();
+        this.host = null;
+        this.client = null;
+    }
+
+    send(ws, data) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(data));
+        }
     }
 
     async fetch(request) {
         if (request.headers.get("Upgrade") !== "websocket") {
-            return new Response("Signaling server OK");
+            return new Response("WebSocket required", { status: 426 });
         }
 
         const pair = new WebSocketPair();
-        const client = pair[0];
-        const server = pair[1];
+        const browser = pair[0];
+        const ws = pair[1];
 
-        server.accept();
+        ws.accept();
 
-        this.clients.add(server);
+        if (!this.host) {
+            this.host = ws;
+            this.send(ws, {
+                type: "hosted"
+            });
+        } else if (!this.client) {
+            this.client = ws;
 
-        server.addEventListener("message", event => {
-            for (const peer of this.clients) {
-                if (peer !== server) {
-                    peer.send(event.data);
-                }
+            this.send(ws, {
+                type: "joined"
+            });
+
+            this.send(this.host, {
+                type: "peer_joined"
+            });
+        } else {
+            this.send(ws, {
+                type: "error",
+                message: "Room is full"
+            });
+
+            ws.close();
+        }
+
+        ws.addEventListener("message", event => {
+            let message;
+
+            try {
+                message = JSON.parse(event.data);
+            } catch {
+                return;
+            }
+
+            const other = ws === this.host
+                ? this.client
+                : this.host;
+
+            if (!other) {
+                return;
+            }
+
+            if (message.type === "sdp" || message.type === "ice") {
+                this.send(other, message);
             }
         });
 
-        const remove = () => {
-            this.clients.delete(server);
-        };
+        ws.addEventListener("close", () => {
+            if (ws === this.host) {
+                this.send(this.client, {
+                    type: "peer_left"
+                });
 
-        server.addEventListener("close", remove);
-        server.addEventListener("error", remove);
+                this.host = null;
+                this.client = null;
+            } else if (ws === this.client) {
+                this.send(this.host, {
+                    type: "peer_left"
+                });
+
+                this.client = null;
+            }
+        });
 
         return new Response(null, {
             status: 101,
-            webSocket: client
+            webSocket: browser
         });
     }
 }
