@@ -1,5 +1,22 @@
 import { DurableObject } from "cloudflare:workers";
+server.addEventListener("message", event => {
 
+    console.log(
+        "MESSAGE FROM",
+        this.peers.get(server),
+        ":",
+        event.data
+    );
+
+    let message;
+
+    try {
+        message = JSON.parse(event.data);
+    } catch {
+        return;
+    }
+
+    // остальной код...
 
 export class SignalingRoom extends DurableObject {
 
