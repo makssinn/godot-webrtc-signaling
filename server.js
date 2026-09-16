@@ -29,7 +29,9 @@ export class SignalingRoom extends DurableObject {
 
     async fetch(request) {
 
-        if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+        const upgrade = request.headers.get("Upgrade");
+
+        if (!upgrade || upgrade.toLowerCase() !== "websocket") {
             return new Response("WebSocket required", {
                 status: 426
             });
@@ -92,7 +94,11 @@ export class SignalingRoom extends DurableObject {
             try {
                 message = JSON.parse(event.data);
             } catch {
-                console.log("INVALID JSON:", senderId);
+                console.log(
+                    "INVALID JSON FROM:",
+                    senderId
+                );
+
                 return;
             }
 
@@ -112,23 +118,71 @@ export class SignalingRoom extends DurableObject {
             }
 
 
-            const forwarded = {
-                ...message,
-                peer_id: senderId
-            };
+            const targetId = Number(message.peer_id);
+
+            if (!Number.isInteger(targetId)) {
+                console.log(
+                    "INVALID TARGET:",
+                    senderId,
+                    message.peer_id
+                );
+
+                return;
+            }
+
+
+            let targetSocket = null;
+
+
+            for (const [socket, id] of this.peers) {
+
+                if (id === targetId) {
+                    targetSocket = socket;
+                    break;
+                }
+
+            }
+
+
+            if (!targetSocket) {
+
+                console.log(
+                    "TARGET NOT FOUND:",
+                    senderId,
+                    "->",
+                    targetId
+                );
+
+                return;
+            }
+
+
+            message.peer_id = senderId;
 
 
             console.log(
-                "BROADCAST SIGNAL:",
+                "FORWARD:",
                 senderId,
+                "->",
+                targetId,
                 message.type
             );
 
 
-            this.broadcast(
-                forwarded,
-                server
+            this.send(
+                targetSocket,
+                message
             );
+
+
+            console.log(
+                "FORWARDED:",
+                senderId,
+                "->",
+                targetId,
+                message.type
+            );
+
         });
 
 
@@ -143,6 +197,7 @@ export class SignalingRoom extends DurableObject {
 
             this.peers.delete(server);
 
+
             console.log(
                 "PLAYER LEFT:",
                 id
@@ -153,15 +208,18 @@ export class SignalingRoom extends DurableObject {
                 type: "peer_left",
                 peer_id: id
             });
+
         });
 
 
         server.addEventListener("error", error => {
+
             console.log(
                 "WEBSOCKET ERROR:",
                 peerId,
                 error
             );
+
         });
 
 
@@ -181,9 +239,11 @@ export default {
 
 
         if (url.pathname === "/") {
+
             return new Response(
                 "Godot WebRTC signaling server OK"
             );
+
         }
 
 
@@ -194,21 +254,32 @@ export default {
             parts[1] !== "room" ||
             !parts[2]
         ) {
+
             return new Response(
                 "Use /room/ROOM_CODE",
                 {
                     status: 400
                 }
             );
+
         }
 
 
         const roomCode = parts[2].toUpperCase();
 
 
-        const id = env.SIGNALING.idFromName(roomCode);
+        console.log(
+            "ROOM:",
+            roomCode
+        );
 
-        const room = env.SIGNALING.get(id);
+
+        const id =
+            env.SIGNALING.idFromName(roomCode);
+
+
+        const room =
+            env.SIGNALING.get(id);
 
 
         return room.fetch(request);
