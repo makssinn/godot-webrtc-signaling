@@ -1,22 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-server.addEventListener("message", event => {
 
-    console.log(
-        "MESSAGE FROM",
-        this.peers.get(server),
-        ":",
-        event.data
-    );
-
-    let message;
-
-    try {
-        message = JSON.parse(event.data);
-    } catch {
-        return;
-    }
-
-    // остальной код...
 
 export class SignalingRoom extends DurableObject {
 
@@ -99,23 +82,30 @@ export class SignalingRoom extends DurableObject {
 
         server.addEventListener("message", event => {
 
+            const senderId = this.peers.get(server);
+
+            console.log(
+                "MESSAGE:",
+                senderId,
+                event.data
+            );
+
+
+            if (!senderId) {
+                return;
+            }
+
+
             let message;
 
             try {
                 message = JSON.parse(event.data);
             } catch {
                 console.log(
-                    "INVALID JSON FROM",
-                    peerId
+                    "INVALID JSON FROM:",
+                    senderId
                 );
 
-                return;
-            }
-
-
-            const senderId = this.peers.get(server);
-
-            if (!senderId) {
                 return;
             }
 
@@ -124,11 +114,29 @@ export class SignalingRoom extends DurableObject {
                 message.type !== "sdp" &&
                 message.type !== "ice"
             ) {
+                console.log(
+                    "IGNORED MESSAGE:",
+                    senderId,
+                    message.type
+                );
+
                 return;
             }
 
 
             const targetId = Number(message.peer_id);
+
+
+            if (!Number.isInteger(targetId)) {
+
+                console.log(
+                    "INVALID TARGET:",
+                    senderId,
+                    message.peer_id
+                );
+
+                return;
+            }
 
 
             let targetSocket = null;
@@ -157,14 +165,14 @@ export class SignalingRoom extends DurableObject {
             }
 
 
-            const forwarded = {
+            const forwardedMessage = {
                 ...message,
                 peer_id: senderId
             };
 
 
             console.log(
-                "SIGNAL:",
+                "FORWARD:",
                 senderId,
                 "->",
                 targetId,
@@ -174,7 +182,16 @@ export class SignalingRoom extends DurableObject {
 
             this.send(
                 targetSocket,
-                forwarded
+                forwardedMessage
+            );
+
+
+            console.log(
+                "FORWARDED:",
+                senderId,
+                "->",
+                targetId,
+                message.type
             );
 
         });
