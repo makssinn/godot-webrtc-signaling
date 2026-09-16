@@ -59,8 +59,13 @@ export class SignalingRoom extends DurableObject {
         });
 
 
-        const existingPeers = [...this.peers.values()]
-            .filter(id => id !== peerId);
+        const existingPeers = [];
+
+        for (const id of this.peers.values()) {
+            if (id !== peerId) {
+                existingPeers.push(id);
+            }
+        }
 
 
         this.send(server, {
@@ -82,7 +87,11 @@ export class SignalingRoom extends DurableObject {
             try {
                 message = JSON.parse(event.data);
             } catch {
-                console.log("INVALID JSON FROM:", peerId);
+                console.log(
+                    "INVALID JSON FROM",
+                    peerId
+                );
+
                 return;
             }
 
@@ -98,41 +107,28 @@ export class SignalingRoom extends DurableObject {
                 message.type !== "sdp" &&
                 message.type !== "ice"
             ) {
-                console.log(
-                    "IGNORED MESSAGE:",
-                    senderId,
-                    message.type
-                );
-
                 return;
             }
 
 
             const targetId = Number(message.peer_id);
 
-            if (!Number.isInteger(targetId)) {
-                console.log(
-                    "INVALID TARGET:",
-                    senderId,
-                    message.peer_id
-                );
-
-                return;
-            }
-
 
             let targetSocket = null;
 
 
             for (const [socket, id] of this.peers) {
+
                 if (id === targetId) {
                     targetSocket = socket;
                     break;
                 }
+
             }
 
 
             if (!targetSocket) {
+
                 console.log(
                     "TARGET NOT FOUND:",
                     senderId,
@@ -144,7 +140,7 @@ export class SignalingRoom extends DurableObject {
             }
 
 
-            const forwardedMessage = {
+            const forwarded = {
                 ...message,
                 peer_id: senderId
             };
@@ -161,7 +157,7 @@ export class SignalingRoom extends DurableObject {
 
             this.send(
                 targetSocket,
-                forwardedMessage
+                forwarded
             );
 
         });
@@ -220,9 +216,11 @@ export default {
 
 
         if (url.pathname === "/") {
+
             return new Response(
                 "Godot WebRTC signaling server OK"
             );
+
         }
 
 
@@ -233,12 +231,14 @@ export default {
             parts[1] !== "room" ||
             !parts[2]
         ) {
+
             return new Response(
                 "Use /room/ROOM_CODE",
                 {
                     status: 400
                 }
             );
+
         }
 
 
