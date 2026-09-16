@@ -3,8 +3,9 @@ import { DurableObject } from "cloudflare:workers";
 export class SignalingRoom extends DurableObject {
     constructor(ctx, env) {
         super(ctx, env);
-        this.host = null;
-        this.client = null;
+
+        this.peers = new Map();
+        this.nextPeerId = 1;
     }
 
     send(ws, data) {
@@ -13,39 +14,56 @@ export class SignalingRoom extends DurableObject {
         }
     }
 
+    broadcast(data, except = null) {
+        for (const ws of this.peers.values()) {
+            if (ws !== except) {
+                this.send(ws, data);
+            }
+        }
+    }
+
     async fetch(request) {
         if (request.headers.get("Upgrade") !== "websocket") {
-            return new Response("WebSocket required", { status: 426 });
+            return new Response("WebSocket required", {
+                status: 426
+            });
         }
 
         const pair = new WebSocketPair();
-        const browser = pair[0];
+
+        const client = pair[0];
         const ws = pair[1];
 
         ws.accept();
 
-        if (!this.host) {
-            this.host = ws;
-            this.send(ws, {
-                type: "hosted"
-            });
-        } else if (!this.client) {
-            this.client = ws;
+        const peerId = this.nextPeerId++;
+        this.peers.set(ws, peerId);
 
+        console.log("PLAYER JOINED:", peerId);
+
+        this.send(ws, {
+            type: "hosted",
+            peer_id: peerId
+        });
+
+        const existingPeers = [];
+
+        for (const id of this.peers.values()) {
+            if (id !== peerId) {
+                existingPeers.push(id);
+            }
+        }
+
+        if (existingPeers.length > 0) {
             this.send(ws, {
-                type: "joined"
+                type: "peer_list",
+                peers: existingPeers
             });
 
-            this.send(this.host, {
-                type: "peer_joined"
-            });
-        } else {
-            this.send(ws, {
-                type: "error",
-                message: "Room is full"
-            });
-
-            ws.close();
+            this.broadcast({
+                type: "peer_joined",
+                peer_id: peerId
+            }, ws);
         }
 
         ws.addEventListener("message", event => {
@@ -57,57 +75,83 @@ export class SignalingRoom extends DurableObject {
                 return;
             }
 
-            const other = ws === this.host
-                ? this.client
-                : this.host;
+            const senderId = this.peers.get(ws);
 
-            if (!other) {
+            if (!senderId) {
                 return;
             }
 
-            if (message.type === "sdp" || message.type === "ice") {
-                this.send(other, message);
+            if (
+                message.type !== "sdp" &&
+                message.type !== "ice"
+            ) {
+                return;
             }
+
+            const targetId = Number(message.peer_id);
+
+            let targetSocket = null;
+
+            for (const [socket, id] of this.peers) {
+                if (id === targetId) {
+                    targetSocket = socket;
+                    break;
+                }
+            }
+
+            if (!targetSocket) {
+                return;
+            }
+
+            message.peer_id = senderId;
+
+            this.send(targetSocket, message);
         });
 
         ws.addEventListener("close", () => {
-            if (ws === this.host) {
-                this.send(this.client, {
-                    type: "peer_left"
-                });
+            const id = this.peers.get(ws);
 
-                this.host = null;
-                this.client = null;
-            } else if (ws === this.client) {
-                this.send(this.host, {
-                    type: "peer_left"
-                });
-
-                this.client = null;
+            if (!id) {
+                return;
             }
+
+            this.peers.delete(ws);
+
+            console.log("PLAYER LEFT:", id);
+
+            this.broadcast({
+                type: "peer_left",
+                peer_id: id
+            });
         });
 
         return new Response(null, {
             status: 101,
-            webSocket: browser
+            webSocket: client
         });
     }
 }
+
 
 export default {
     async fetch(request, env) {
         const url = new URL(request.url);
 
         if (url.pathname === "/") {
-            return new Response("Godot WebRTC signaling server OK");
+            return new Response(
+                "Godot WebRTC signaling server OK"
+            );
         }
 
         const parts = url.pathname.split("/");
 
         if (parts[1] !== "room" || !parts[2]) {
-            return new Response("Use /room/ROOM_CODE", {
-                status: 400
-            });
+            return new Response(
+                "Use /room/ROOM_CODE",
+                {
+                    status: 400
+                }
+            );
         }
 
         const roomCode = parts[2].toUpperCase();
