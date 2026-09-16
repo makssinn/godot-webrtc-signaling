@@ -9,13 +9,13 @@ export class SignalingRoom extends DurableObject {
     }
 
     send(ws, data) {
-        if (ws && ws.readyState === WebSocket.OPEN) {
+        if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify(data));
         }
     }
 
     broadcast(data, except = null) {
-        for (const ws of this.peers.values()) {
+        for (const ws of this.peers.keys()) {
             if (ws !== except) {
                 this.send(ws, data);
             }
@@ -23,7 +23,9 @@ export class SignalingRoom extends DurableObject {
     }
 
     async fetch(request) {
-        if (request.headers.get("Upgrade") !== "websocket") {
+        const upgrade = request.headers.get("Upgrade");
+
+        if (!upgrade || upgrade.toLowerCase() !== "websocket") {
             return new Response("WebSocket required", {
                 status: 426
             });
@@ -32,16 +34,17 @@ export class SignalingRoom extends DurableObject {
         const pair = new WebSocketPair();
 
         const client = pair[0];
-        const ws = pair[1];
+        const server = pair[1];
 
-        ws.accept();
+        server.accept();
 
         const peerId = this.nextPeerId++;
-        this.peers.set(ws, peerId);
+
+        this.peers.set(server, peerId);
 
         console.log("PLAYER JOINED:", peerId);
 
-        this.send(ws, {
+        this.send(server, {
             type: "hosted",
             peer_id: peerId
         });
@@ -55,7 +58,7 @@ export class SignalingRoom extends DurableObject {
         }
 
         if (existingPeers.length > 0) {
-            this.send(ws, {
+            this.send(server, {
                 type: "peer_list",
                 peers: existingPeers
             });
@@ -63,10 +66,10 @@ export class SignalingRoom extends DurableObject {
             this.broadcast({
                 type: "peer_joined",
                 peer_id: peerId
-            }, ws);
+            }, server);
         }
 
-        ws.addEventListener("message", event => {
+        server.addEventListener("message", event => {
             let message;
 
             try {
@@ -75,16 +78,13 @@ export class SignalingRoom extends DurableObject {
                 return;
             }
 
-            const senderId = this.peers.get(ws);
+            const senderId = this.peers.get(server);
 
             if (!senderId) {
                 return;
             }
 
-            if (
-                message.type !== "sdp" &&
-                message.type !== "ice"
-            ) {
+            if (message.type !== "sdp" && message.type !== "ice") {
                 return;
             }
 
@@ -100,6 +100,7 @@ export class SignalingRoom extends DurableObject {
             }
 
             if (!targetSocket) {
+                console.log("TARGET NOT FOUND:", targetId);
                 return;
             }
 
@@ -108,14 +109,14 @@ export class SignalingRoom extends DurableObject {
             this.send(targetSocket, message);
         });
 
-        ws.addEventListener("close", () => {
-            const id = this.peers.get(ws);
+        server.addEventListener("close", () => {
+            const id = this.peers.get(server);
 
             if (!id) {
                 return;
             }
 
-            this.peers.delete(ws);
+            this.peers.delete(server);
 
             console.log("PLAYER LEFT:", id);
 
@@ -155,6 +156,8 @@ export default {
         }
 
         const roomCode = parts[2].toUpperCase();
+
+        console.log("ROOM:", roomCode);
 
         const id = env.SIGNALING.idFromName(roomCode);
         const room = env.SIGNALING.get(id);
