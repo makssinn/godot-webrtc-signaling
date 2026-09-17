@@ -4,10 +4,46 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    // Обычная проверка Worker
     if (url.pathname === "/") {
       return new Response("Godot WebRTC Signaling Server OK");
     }
 
+    // ЧИСТЫЙ WEBSOCKET ТЕСТ
+    // Без Durable Object
+    if (url.pathname === "/echo") {
+      if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+        return new Response("Expected WebSocket", { status: 426 });
+      }
+
+      const pair = new WebSocketPair();
+
+      const client = pair[0];
+      const server = pair[1];
+
+      server.accept();
+
+      console.log("ECHO: WEBSOCKET ACCEPTED");
+
+      server.send("HELLO FROM CLOUDFLARE");
+
+      server.addEventListener("message", event => {
+        console.log("ECHO MESSAGE:", event.data);
+
+        server.send("ECHO: " + event.data);
+      });
+
+      server.addEventListener("close", event => {
+        console.log("ECHO CLOSED:", event.code, event.reason);
+      });
+
+      return new Response(null, {
+        status: 101,
+        webSocket: client
+      });
+    }
+
+    // ROOM
     if (!url.pathname.startsWith("/room/")) {
       return new Response("Not found", { status: 404 });
     }
@@ -18,18 +54,19 @@ export default {
 
     const roomCode = decodeURIComponent(
       url.pathname.substring("/room/".length)
-    );
+    ).toUpperCase();
 
     if (!roomCode) {
       return new Response("Room code required", { status: 400 });
     }
 
-    const id = env.SIGNALING.idFromName(roomCode.toUpperCase());
+    const id = env.SIGNALING.idFromName(roomCode);
     const room = env.SIGNALING.get(id);
 
     return room.fetch(request);
   }
 };
+
 
 export class SignalingRoom extends DurableObject {
 
@@ -156,7 +193,6 @@ export class SignalingRoom extends DurableObject {
     this.peers.delete(peerId);
 
     console.log("PLAYER LEFT:", peerId);
-    console.log("PLAYERS:", [...this.peers.keys()]);
 
     const message = JSON.stringify({
       type: "peer_left",
