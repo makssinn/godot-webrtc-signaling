@@ -1,27 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 
 export class SignalingRoom extends DurableObject {
-    constructor(ctx, env) {
-        super(ctx, env);
-
-        this.peers = new Map();
-        this.nextPeerId = 1;
-    }
-
-    send(socket, data) {
-        if (socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify(data));
-        }
-    }
-
-    broadcast(data, except = null) {
-        for (const socket of this.peers.keys()) {
-            if (socket !== except) {
-                this.send(socket, data);
-            }
-        }
-    }
-
     async fetch(request) {
         if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
             return new Response("WebSocket required", {
@@ -30,148 +9,35 @@ export class SignalingRoom extends DurableObject {
         }
 
         const pair = new WebSocketPair();
-
         const client = pair[0];
         const server = pair[1];
 
-        server.accept();
+        this.ctx.acceptWebSocket(server);
 
-        const peerId = this.nextPeerId++;
+        console.log("WEBSOCKET ACCEPTED");
 
-        this.peers.set(server, peerId);
-
-        console.log("PLAYER JOINED:", peerId);
-
-        this.send(server, {
+        server.send(JSON.stringify({
             type: "welcome",
-            peer_id: peerId
-        });
-
-        const existingPeers = [];
-
-        for (const id of this.peers.values()) {
-            if (id !== peerId) {
-                existingPeers.push(id);
-            }
-        }
-
-        this.send(server, {
-            type: "peer_list",
-            peers: existingPeers
-        });
-
-        this.broadcast(
-            {
-                type: "peer_joined",
-                peer_id: peerId
-            },
-            server
-        );
-
-        server.addEventListener("message", event => {
-            const senderId = this.peers.get(server);
-
-            if (!senderId) {
-                return;
-            }
-
-            let message;
-
-            try {
-                message = JSON.parse(event.data);
-            } catch {
-                console.log("INVALID JSON FROM:", senderId);
-                return;
-            }
-
-            console.log(
-                "MESSAGE:",
-                senderId,
-                message.type
-            );
-
-            if (
-                message.type !== "sdp" &&
-                message.type !== "ice"
-            ) {
-                return;
-            }
-
-            const targetId = Number(message.peer_id);
-
-            if (!Number.isInteger(targetId)) {
-                console.log(
-                    "INVALID TARGET:",
-                    senderId,
-                    message.peer_id
-                );
-                return;
-            }
-
-            let targetSocket = null;
-
-            for (const [socket, id] of this.peers) {
-                if (id === targetId) {
-                    targetSocket = socket;
-                    break;
-                }
-            }
-
-            if (!targetSocket) {
-                console.log(
-                    "TARGET NOT FOUND:",
-                    senderId,
-                    "->",
-                    targetId
-                );
-                return;
-            }
-
-            const forwarded = {
-                ...message,
-                peer_id: senderId
-            };
-
-            console.log(
-                "FORWARD:",
-                senderId,
-                "->",
-                targetId,
-                message.type
-            );
-
-            this.send(targetSocket, forwarded);
-        });
-
-        server.addEventListener("close", () => {
-            const id = this.peers.get(server);
-
-            if (!id) {
-                return;
-            }
-
-            this.peers.delete(server);
-
-            console.log("PLAYER LEFT:", id);
-
-            this.broadcast({
-                type: "peer_left",
-                peer_id: id
-            });
-        });
-
-        server.addEventListener("error", error => {
-            console.log(
-                "WEBSOCKET ERROR:",
-                peerId,
-                error
-            );
-        });
+            peer_id: 1
+        }));
 
         return new Response(null, {
             status: 101,
             webSocket: client
         });
+    }
+
+    webSocketMessage(ws, message) {
+        console.log("MESSAGE:", message);
+
+        ws.send(JSON.stringify({
+            type: "echo",
+            message: message
+        }));
+    }
+
+    webSocketClose(ws, code, reason, wasClean) {
+        console.log("WEBSOCKET CLOSED:", code, reason, wasClean);
     }
 }
 
@@ -196,6 +62,17 @@ export default {
                 "Use /room/ROOM_CODE",
                 {
                     status: 400
+                }
+            );
+        }
+
+        if (
+            request.headers.get("Upgrade")?.toLowerCase() !== "websocket"
+        ) {
+            return new Response(
+                "WebSocket required",
+                {
+                    status: 426
                 }
             );
         }
