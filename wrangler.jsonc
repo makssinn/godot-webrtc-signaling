@@ -1,10 +1,7 @@
 {
   "$schema": "https://developers.cloudflare.com/workers/wrangler/config-schema.json",
-
   "name": "godot-webrtc-signaling",
-
   "main": "server.js",
-
   "compatibility_date": "2026-09-17",
 
   "observability": {
