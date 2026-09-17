@@ -1,3 +1,5 @@
+import { DurableObject } from "cloudflare:workers";
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -22,13 +24,12 @@ export default {
       return new Response("Room code required", { status: 400 });
     }
 
-    const id = env.SIGNALING.idFromName(roomCode);
+    const id = env.SIGNALING.idFromName(roomCode.toUpperCase());
     const room = env.SIGNALING.get(id);
 
     return room.fetch(request);
   }
 };
-
 
 export class SignalingRoom extends DurableObject {
 
@@ -50,6 +51,7 @@ export class SignalingRoom extends DurableObject {
     const server = pair[1];
 
     const peerId = this.nextPeerId++;
+
     this.peers.set(peerId, server);
 
     server.accept();
@@ -65,21 +67,19 @@ export class SignalingRoom extends DurableObject {
     const existingPeers = [...this.peers.keys()]
       .filter(id => id !== peerId);
 
-    if (existingPeers.length > 0) {
-      server.send(JSON.stringify({
-        type: "peer_list",
-        peers: existingPeers
-      }));
+    server.send(JSON.stringify({
+      type: "peer_list",
+      peers: existingPeers
+    }));
 
-      for (const otherId of existingPeers) {
-        const other = this.peers.get(otherId);
+    for (const otherId of existingPeers) {
+      const other = this.peers.get(otherId);
 
-        if (other) {
-          other.send(JSON.stringify({
-            type: "peer_joined",
-            peer_id: peerId
-          }));
-        }
+      if (other) {
+        other.send(JSON.stringify({
+          type: "peer_joined",
+          peer_id: peerId
+        }));
       }
     }
 
@@ -106,24 +106,28 @@ export class SignalingRoom extends DurableObject {
 
     try {
       message = JSON.parse(data);
-    } catch (error) {
+    } catch {
       console.log("INVALID JSON FROM:", senderId);
       return;
     }
 
-    console.log("MESSAGE FROM:", senderId, message);
+    console.log("MESSAGE FROM:", senderId, message.type);
+
+    if (message.type !== "sdp" && message.type !== "ice") {
+      return;
+    }
 
     const targetId = Number(message.peer_id);
 
     if (!Number.isInteger(targetId)) {
-      console.log("MESSAGE WITHOUT TARGET:", senderId);
+      console.log("INVALID TARGET:", senderId, message.peer_id);
       return;
     }
 
     const target = this.peers.get(targetId);
 
     if (!target) {
-      console.log("TARGET NOT FOUND:", targetId);
+      console.log("TARGET NOT FOUND:", senderId, "->", targetId);
       return;
     }
 
@@ -133,7 +137,7 @@ export class SignalingRoom extends DurableObject {
       target.send(JSON.stringify(message));
 
       console.log(
-        "FORWARDED:",
+        "FORWARD:",
         senderId,
         "->",
         targetId,
@@ -159,11 +163,11 @@ export class SignalingRoom extends DurableObject {
       peer_id: peerId
     });
 
-    for (const [otherId, socket] of this.peers) {
+    for (const socket of this.peers.values()) {
       try {
         socket.send(message);
-      } catch (error) {
-        console.log("ERROR NOTIFYING:", otherId);
+      } catch {
+        console.log("ERROR NOTIFYING PLAYER");
       }
     }
   }
