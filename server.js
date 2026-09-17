@@ -94,26 +94,15 @@ export class SignalingRoom extends DurableObject {
             try {
                 message = JSON.parse(event.data);
             } catch {
-                console.log(
-                    "INVALID JSON FROM:",
-                    senderId
-                );
-
+                console.log("INVALID JSON FROM:", senderId);
                 return;
             }
 
 
-            console.log(
-                "MESSAGE:",
-                senderId,
-                message.type
-            );
+            console.log("MESSAGE:", senderId, message.type);
 
 
-            if (
-                message.type !== "sdp" &&
-                message.type !== "ice"
-            ) {
+            if (message.type !== "sdp" && message.type !== "ice") {
                 return;
             }
 
@@ -121,68 +110,40 @@ export class SignalingRoom extends DurableObject {
             const targetId = Number(message.peer_id);
 
             if (!Number.isInteger(targetId)) {
-                console.log(
-                    "INVALID TARGET:",
-                    senderId,
-                    message.peer_id
-                );
-
+                console.log("INVALID TARGET:", message.peer_id);
                 return;
             }
 
 
             let targetSocket = null;
 
-
             for (const [socket, id] of this.peers) {
-
                 if (id === targetId) {
                     targetSocket = socket;
                     break;
                 }
-
             }
 
 
             if (!targetSocket) {
-
-                console.log(
-                    "TARGET NOT FOUND:",
-                    senderId,
-                    "->",
-                    targetId
-                );
-
+                console.log("TARGET NOT FOUND:", senderId, "->", targetId);
                 return;
             }
 
 
-            message.peer_id = senderId;
+            const forwarded = {
+                ...message,
+                peer_id: senderId
+            };
 
 
-            console.log(
-                "FORWARD:",
-                senderId,
-                "->",
-                targetId,
-                message.type
-            );
+            console.log("FORWARD:", senderId, "->", targetId, message.type);
 
 
-            this.send(
-                targetSocket,
-                message
-            );
+            this.send(targetSocket, forwarded);
 
 
-            console.log(
-                "FORWARDED:",
-                senderId,
-                "->",
-                targetId,
-                message.type
-            );
-
+            console.log("FORWARDED:", senderId, "->", targetId, message.type);
         });
 
 
@@ -198,28 +159,18 @@ export class SignalingRoom extends DurableObject {
             this.peers.delete(server);
 
 
-            console.log(
-                "PLAYER LEFT:",
-                id
-            );
+            console.log("PLAYER LEFT:", id);
 
 
             this.broadcast({
                 type: "peer_left",
                 peer_id: id
             });
-
         });
 
 
         server.addEventListener("error", error => {
-
-            console.log(
-                "WEBSOCKET ERROR:",
-                peerId,
-                error
-            );
-
+            console.log("WEBSOCKET ERROR:", peerId, error);
         });
 
 
@@ -239,47 +190,29 @@ export default {
 
 
         if (url.pathname === "/") {
-
-            return new Response(
-                "Godot WebRTC signaling server OK"
-            );
-
+            return new Response("Godot WebRTC signaling server OK");
         }
 
 
         const parts = url.pathname.split("/");
 
 
-        if (
-            parts[1] !== "room" ||
-            !parts[2]
-        ) {
-
-            return new Response(
-                "Use /room/ROOM_CODE",
-                {
-                    status: 400
-                }
-            );
-
+        if (parts[1] !== "room" || !parts[2]) {
+            return new Response("Use /room/ROOM_CODE", {
+                status: 400
+            });
         }
 
 
         const roomCode = parts[2].toUpperCase();
 
 
-        console.log(
-            "ROOM:",
-            roomCode
-        );
+        console.log("ROOM:", roomCode);
 
 
-        const id =
-            env.SIGNALING.idFromName(roomCode);
+        const id = env.SIGNALING.idFromName(roomCode);
 
-
-        const room =
-            env.SIGNALING.get(id);
+        const room = env.SIGNALING.get(id);
 
 
         return room.fetch(request);
