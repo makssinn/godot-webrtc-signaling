@@ -2,31 +2,5 @@
   "$schema": "https://developers.cloudflare.com/workers/wrangler/config-schema.json",
   "name": "godot-webrtc-signaling",
   "main": "server.js",
-  "compatibility_date": "2026-09-17",
-
-  "observability": {
-    "logs": {
-      "enabled": true,
-      "invocation_logs": true,
-      "persist": true
-    }
-  },
-
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "SIGNALING",
-        "class_name": "SignalingRoom"
-      }
-    ]
-  },
-
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": [
-        "SignalingRoom"
-      ]
-    }
-  ]
+  "compatibility_date": "2026-09-17"
 }
